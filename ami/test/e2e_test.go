@@ -19,9 +19,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// Occasionally, a Packer build may fail due to intermittent issues (e.g., brief network outage or EC2 issue). We try
-// to make our tests resilient to that by specifying those known common errors here and telling our builds to retry if
-// they hit those errors.
+// Occasionally a Packer build fails on intermittent issues (brief network
+// outage, EC2 hiccup). Retry on these known-transient errors.
 var DefaultRetryablePackerErrors = map[string]string{
 	"Script disconnected unexpectedly":                                                 "Occasionally, Packer seems to lose connectivity to AWS, perhaps due to a brief network outage",
 	"can not open /var/lib/apt/lists/archive.ubuntu.com_ubuntu_dists_xenial_InRelease": "Occasionally, apt-get fails on ubuntu to update the cache",
@@ -32,151 +31,171 @@ const DefaultMaxPackerRetries = 3
 
 var logger = loggers.Default
 
-// This is a complicated, end-to-end integration test. It builds the AMI from examples/packer-docker-example,
-// deploys it using the Terraform code in terraform dir, and checks that the web server in the AMI
-// response to requests. The test is broken into "stages" so you can skip stages by setting environment variables (e.g.,
-// skip stage "build_ami" by setting the environment variable "SKIP_build_ami=true"), which speeds up iteration when
-// running this test over and over again locally.
-func TestTerraformPackerAtlantis(t *testing.T) {
+// End-to-end test: build the sheesh AMI with Packer, deploy it with the box
+// terraform module, and assert the box serves the synced content over TLS.
+//
+// It is broken into terratest stages so you can skip stages locally via env
+// vars (e.g. SKIP_build_ami=true), and it requires real infrastructure inputs:
+//
+//	SHEESH_TEST_DNS_DOMAIN   a Route53 zone in the test account (e.g. example.com)
+//	SHEESH_TEST_CONTENT_REPO the content repo to serve, "org/repo"
+//	SHEESH_TEST_DEPLOY_KEY   PEM private deploy key with read access to that repo
+//
+// Optional: SHEESH_TEST_AWS_REGION (default ap-southeast-1),
+// SHEESH_TEST_CONTENT_BRANCH (default main). The test skips when the required
+// inputs are absent, so it is safe to run in environments without them.
+func TestTerraformPackerSheesh(t *testing.T) {
 	t.Parallel()
-	// all tests will run from terraform module for atlantis dir
-	workingDir := "./terraform"
-	awsRegion := "ap-southeast-1"
 
-	// At the end of the test, delete the AMI
+	cfg, ok := loadTestConfig(t)
+	if !ok {
+		t.Skip("set SHEESH_TEST_DNS_DOMAIN, SHEESH_TEST_CONTENT_REPO (org/repo) and SHEESH_TEST_DEPLOY_KEY to run the e2e")
+	}
+
+	workingDir := "./terraform"
+
+	// At the end of the test, delete the AMI.
 	defer test_structure.RunTestStage(t, "cleanup_ami", func() {
-		deleteAMI(t, awsRegion, workingDir)
+		deleteAMI(t, cfg.awsRegion, workingDir)
 	})
 
-	// At the end of the test, undeploy atlantis using Terraform
+	// At the end of the test, undeploy the box.
 	defer test_structure.RunTestStage(t, "cleanup_terraform", func() {
 		undeployUsingTerraform(t, workingDir)
 	})
 
-	// Build the AMI for atlantis
+	// Build the sheesh AMI.
 	test_structure.RunTestStage(t, "build_ami", func() {
-		buildAMI(t, awsRegion, workingDir)
+		buildAMI(t, cfg, workingDir)
 	})
 
-	// Deploy atlantis using Terraform
+	// Deploy the box.
 	test_structure.RunTestStage(t, "deploy_terraform", func() {
-		deployUsingTerraform(t, awsRegion, workingDir)
+		deployUsingTerraform(t, cfg, workingDir)
 	})
 
-	// Validate that atlantis deployed and is responding to HTTP requests
+	// Validate the box booted and serves content over TLS.
 	test_structure.RunTestStage(t, "validate", func() {
-		testSSMConnection(t, awsRegion, workingDir)
-		validateInstanceRunningWebServer(t, workingDir)
+		testSSMConnection(t, cfg.awsRegion, workingDir)
+		validateBoxServesContent(t, workingDir)
 	})
 }
 
-// Build the AMI for Atlantis
-func buildAMI(t *testing.T, awsRegion string, workingDir string) {
+type testConfig struct {
+	awsRegion     string
+	dnsDomain     string
+	githubOrg     string
+	contentRepo   string
+	contentBranch string
+	deployKey     string
+}
+
+func loadTestConfig(t *testing.T) (testConfig, bool) {
+	dnsDomain := os.Getenv("SHEESH_TEST_DNS_DOMAIN")
+	repo := os.Getenv("SHEESH_TEST_CONTENT_REPO")
+	deployKey := os.Getenv("SHEESH_TEST_DEPLOY_KEY")
+	if dnsDomain == "" || repo == "" || deployKey == "" {
+		return testConfig{}, false
+	}
+	org, name, found := strings.Cut(repo, "/")
+	if !found {
+		t.Fatalf("SHEESH_TEST_CONTENT_REPO must be in org/repo form, got %q", repo)
+	}
+	return testConfig{
+		awsRegion:     envOr("SHEESH_TEST_AWS_REGION", "ap-southeast-1"),
+		dnsDomain:     dnsDomain,
+		githubOrg:     org,
+		contentRepo:   name,
+		contentBranch: envOr("SHEESH_TEST_CONTENT_BRANCH", "main"),
+		deployKey:     deployKey,
+	}, true
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+// buildAMI builds the sheesh AMI in the default VPC.
+func buildAMI(t *testing.T, cfg testConfig, workingDir string) {
+	vpc := aws.GetDefaultVpc(t, cfg.awsRegion)
+	if len(vpc.Subnets) == 0 {
+		t.Fatalf("default VPC %s has no subnets to build the AMI in", vpc.Id)
+	}
+
 	packerOptions := &packer.Options{
-		WorkingDir: "../../../packer",
-		Template:   "atlantis-arm64/build.pkr.hcl",
-		// Only build the AMI
-		Only: "amazon-ebs.ubuntu",
+		// Relative to this test file (ami/test) -> the ami/ packer dir.
+		WorkingDir: "..",
+		Template:   "build.pkr.hcl",
+		Only:       "amazon-ebs.ubuntu",
 
-		// Variables to pass to our Packer build using -var options
-		// assuming .auto.pkrvars.hcl are loaded
 		Vars: map[string]string{
-			"pr": "true",
-		},
-		VarFiles: []string{
-			"atlantis-arm64/.auto.pkrvars.hcl",
+			"pr":        "true",
+			"vpc_id":    vpc.Id,
+			"subnet_id": vpc.Subnets[0].Id,
 		},
 
-		// Configure retries for intermittent errors
 		RetryableErrors:    DefaultRetryablePackerErrors,
 		TimeBetweenRetries: DefaultTimeBetweenPackerRetries,
 		MaxRetries:         DefaultMaxPackerRetries,
 	}
 
-	// Save the Packer Options so future test stages can use them
 	test_structure.SavePackerOptions(t, workingDir, packerOptions)
-
-	// Build the AMI
 	amiID := packer.BuildArtifact(t, packerOptions)
-
-	// Save the AMI ID so future test stages can use them
 	test_structure.SaveArtifactID(t, workingDir, amiID)
 }
 
-// Delete the AMI
 func deleteAMI(t *testing.T, awsRegion string, workingDir string) {
-	// Load the AMI ID and Packer Options saved by the earlier build_ami stage
 	amiID := test_structure.LoadArtifactID(t, workingDir)
-
 	aws.DeleteAmi(t, awsRegion, amiID)
 }
 
-// Deploy the terraform-packer-example using Terraform
-func deployUsingTerraform(t *testing.T, awsRegion string, workingDir string) {
-	// A unique ID we can use to namespace resources so we don't clash with anything already in the AWS account or
-	// tests running in parallel
+func deployUsingTerraform(t *testing.T, cfg testConfig, workingDir string) {
+	// Namespace resources so parallel runs don't clash.
 	uniqueID := strings.ToLower(random.UniqueId())
-
-	// Give this EC2 Instance and other resources in the Terraform code a name with a unique ID so it doesn't clash
-	// with anything else in the AWS account.
 	namePrefix := fmt.Sprintf("e2e-%s", uniqueID)
 
-	// Load the AMI ID saved by the earlier build_ami stage
 	amiID := test_structure.LoadArtifactID(t, workingDir)
 
-	dnsDomain := "devops.handshakes.com.sg"
-	atlantisHostname := fmt.Sprintf("atlantis-%s", namePrefix)
-	test_structure.SaveString(t, workingDir, "dnsDomain", dnsDomain)
-	test_structure.SaveString(t, workingDir, "atlantisHostname", atlantisHostname)
+	hostname := fmt.Sprintf("sheesh-%s", namePrefix)
+	test_structure.SaveString(t, workingDir, "dnsDomain", cfg.dnsDomain)
+	test_structure.SaveString(t, workingDir, "hostname", hostname)
 
-	// Construct the terraform options with default retryable errors to handle the most common retryable errors in
-	// terraform testing.
 	terraformOptions := terraform.WithDefaultRetryableErrors(t, &terraform.Options{
-		// The path to where our Terraform code is located
 		TerraformDir: workingDir,
-
-		// Variables to pass to our Terraform code using -var options
 		Vars: map[string]interface{}{
-			"ami_id":            amiID,
-			"name_prefix":       namePrefix,
-			"hostname_atlantis": atlantisHostname,
-			"aws_region":        awsRegion,
-			"dns_domain":        dnsDomain,
+			"ami_id":         amiID,
+			"name_prefix":    namePrefix,
+			"hostname":       hostname,
+			"aws_region":     cfg.awsRegion,
+			"dns_domain":     cfg.dnsDomain,
+			"github_org":     cfg.githubOrg,
+			"content_repo":   cfg.contentRepo,
+			"content_branch": cfg.contentBranch,
+			"deploy_key":     cfg.deployKey,
 		},
 	})
 
-	// Save the Terraform Options struct, instance name, and instance text so future test stages can use it
 	test_structure.SaveTerraformOptions(t, workingDir, terraformOptions)
-
-	// This will run `terraform init` and `terraform apply` and fail the test if there are any errors
 	terraform.InitAndApply(t, terraformOptions)
 }
 
-// Undeploy the terraform-packer-example using Terraform
 func undeployUsingTerraform(t *testing.T, workingDir string) {
-	// Load the Terraform Options saved by the earlier deploy_terraform stage
 	terraformOptions := test_structure.LoadTerraformOptions(t, workingDir)
-
 	terraform.Destroy(t, terraformOptions)
 }
 
-// Connect through SSM and run validation commands
+// testSSMConnection waits for the box, then dumps boot + service logs via SSM.
 func testSSMConnection(t *testing.T, awsRegion string, workingDir string) {
-	// Load the Terraform Options saved by the earlier deploy_terraform stage
 	terraformOptions := test_structure.LoadTerraformOptions(t, workingDir)
 	asgName := terraform.OutputRequired(t, terraformOptions, "asg_name")
 
-	// It can take a minute or so for the ASG to scale up, so retry a few times
 	maxRetries := 30
 	timeBetweenRetries := 5 * time.Second
 
-	aws.WaitForCapacity(
-		t,
-		asgName,
-		awsRegion,
-		maxRetries,
-		timeBetweenRetries,
-	)
+	aws.WaitForCapacity(t, asgName, awsRegion, maxRetries, timeBetweenRetries)
 	instanceID := aws.GetInstanceIdsForAsg(t, asgName, awsRegion)[0]
 
 	timeout := 10 * time.Minute
@@ -185,38 +204,37 @@ func testSSMConnection(t *testing.T, awsRegion string, workingDir string) {
 		{command: "sudo cloud-init status --wait", printf: "cloud-init status:\n\n%s\n"},
 		{command: "sudo cat /var/log/user-data.log", printf: "user-data log:\n\n%s\n"},
 		{command: "sudo journalctl -u confd", printf: "confd log:\n\n%s\n"},
-		{command: "sudo journalctl -u atlantis", printf: "atlantis log:\n\n%s\n"},
 		{command: "sudo journalctl -u caddy", printf: "caddy log:\n\n%s\n"},
-		{command: "sudo journalctl -u turbo-remote-cache", printf: "turbo-remote-cache log:\n\n%s\n"},
+		{command: "sudo journalctl -u content", printf: "content git-sync log:\n\n%s\n"},
 		{command: "ls -l /var/lib/sheesh/git", printf: "contents of git-sync data directory:\n\n%s\n"},
 	})
 }
 
-// Validate the web server has been deployed and is working
-func validateInstanceRunningWebServer(t *testing.T, workingDir string) {
-
-	// It can take a minute or so for the Instance to boot up, so retry a few times
+// validateBoxServesContent asserts the box answers an HTTPS request with 200.
+func validateBoxServesContent(t *testing.T, workingDir string) {
 	maxRetries := 30
 	timeBetweenRetries := 5 * time.Second
 
 	dnsDomain := test_structure.LoadString(t, workingDir, "dnsDomain")
-	atlantisHostname := test_structure.LoadString(t, workingDir, "atlantisHostname")
-	instanceText := `{
-  "status": "ok"
-}`
-	getOptions := http_helper.HttpGetOptions{
-		Url:       fmt.Sprintf("https://%s.%s/healthz", atlantisHostname, dnsDomain),
-		TlsConfig: getTLSConfig(t),
-		Timeout:   10,
-	}
+	hostname := test_structure.LoadString(t, workingDir, "hostname")
+	url := fmt.Sprintf("https://%s.%s/", hostname, dnsDomain)
 
-	// Verify that we get back a 200 OK with the expected instanceText
-	http_helper.HttpGetWithRetryWithOptions(t, getOptions, 200, instanceText, maxRetries, timeBetweenRetries)
+	// Content is arbitrary static HTML, so only assert the box is serving (200).
+	http_helper.HttpGetWithRetryWithCustomValidation(
+		t,
+		url,
+		getTLSConfig(t),
+		maxRetries,
+		timeBetweenRetries,
+		func(statusCode int, _ string) bool {
+			return statusCode == 200
+		},
+	)
 }
 
-// getTLSConfig returns custom TLS Config
-// -> Let's Encrypt staging root CAs appended to the host system trusted CA Certs
-func getTLSConfig(t *testing.T) (tlsConfig *tls.Config) {
+// getTLSConfig trusts the Let's Encrypt staging roots (the box uses
+// acme_staging=true) in addition to the system roots.
+func getTLSConfig(t *testing.T) *tls.Config {
 	// ref: https://forfuncsake.github.io/post/2017/08/trust-extra-ca-cert-in-go-app/
 	rootCAs, _ := x509.SystemCertPool()
 	if rootCAs == nil {
@@ -234,11 +252,7 @@ func getTLSConfig(t *testing.T) (tlsConfig *tls.Config) {
 		}
 	}
 
-	tlsConfig = &tls.Config{
-		// InsecureSkipVerify: true,
-		RootCAs: rootCAs,
-	}
-	return
+	return &tls.Config{RootCAs: rootCAs}
 }
 
 type ssmCommand struct {
