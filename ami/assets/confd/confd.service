@@ -1,0 +1,11 @@
+[Unit]
+Description=Confd
+
+[Service]
+User=root
+WorkingDirectory=/etc/confd
+ExecStart=/usr/local/bin/confd
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

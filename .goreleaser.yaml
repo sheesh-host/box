@@ -1,0 +1,31 @@
+# goreleaser builds every binary under cmd/<tool>/ for cross-OS/arch.
+# Releases are driven per-binary by release-please tags (sheesh-v*): the release
+# workflow runs goreleaser only when a sheesh-* tag fires, so each cmd/ binary
+# ships as its own release stream. Add a build block per new cmd/<tool>/.
+version: 2
+
+project_name: box
+
+builds:
+  - id: sheesh
+    main: ./cmd/sheesh
+    binary: sheesh
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X main.buildVersion={{ .Version }}
+      - -X main.buildCommit={{ .Commit }}
+      - -X main.buildDate={{ .Date }}
+  # Future: add a `sheesh-server` build block here once cmd/sheesh-server exists.
+
+archives:
+  - id: default
+    name_template: "{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "{{ .ProjectName }}_checksums.txt"
+
+release:
+  prerelease: auto

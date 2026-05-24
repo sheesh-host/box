@@ -1,0 +1,16 @@
+[Unit]
+Description=Sheesh content git-sync
+After=network.target network-online.target
+Requires=network-online.target
+
+StartLimitInterval=200
+StartLimitBurst=5
+
+[Service]
+User=git-sync
+Group=root
+EnvironmentFile=/home/git-sync/content.env
+WorkingDirectory=/home/git-sync
+ExecStart=/usr/local/bin/git-sync
+Restart=always
+RestartSec=30

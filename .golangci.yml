@@ -1,0 +1,17 @@
+# golangci-lint v2 config. Run with a golangci-lint built against Go >= the
+# module's go directive (CI uses the latest release; see ci.yml).
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - revive
+
+formatters:
+  enable:
+    - gofmt

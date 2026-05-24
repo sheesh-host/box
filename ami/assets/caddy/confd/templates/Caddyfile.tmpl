@@ -1,0 +1,16 @@
+{{$data := json (getv "/caddy/data") -}}
+{
+        email {{ $data.email }}
+        default_sni {{ $data.host }}
+        {{- if $data.testCert }}
+        acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+        {{- end }}
+        # https://caddyserver.com/docs/conventions#data-directory
+        storage file_system {{ $data.dataDir }}
+}
+{{ $data.host }} {
+        encode zstd gzip
+        # Serve the static content git-sync keeps in sync from the content repo.
+        root * {{ $data.contentRoot }}
+        file_server
+}

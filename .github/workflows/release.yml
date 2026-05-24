@@ -1,0 +1,44 @@
+# release-please opens/maintains release PRs; merging one cuts a prefixed tag
+# (sheesh-v1.2.0). For a CLI tag, goreleaser then builds that binary's
+# cross-OS/arch assets and attaches them to the GitHub release.
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      releases: ${{ steps.rp.outputs.releases_created }}
+      tag: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - id: rp
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  goreleaser:
+    needs: release-please
+    # Only run for a sheesh CLI release tag.
+    if: needs.release-please.outputs.releases == 'true' && startsWith(needs.release-please.outputs.tag, 'sheesh-')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

@@ -1,0 +1,9 @@
+[template]
+src = "content.env.tmpl"
+dest = "/home/git-sync/content.env"
+owner = "git-sync"
+gid = 0
+mode = "0600"
+keys = [
+    "content-env/contents",
+]

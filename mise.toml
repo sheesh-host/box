@@ -1,0 +1,22 @@
+[tools]
+go = "1.25"
+terraform = "1.7"
+packer = "1.12"
+goreleaser = "latest"
+golangci-lint = "latest"
+
+[tasks.build]
+description = "Build the sheesh CLI"
+run = "go build -o bin/sheesh ./cmd/sheesh"
+
+[tasks.test]
+description = "Run unit tests"
+run = "go test ./..."
+
+[tasks.lint]
+description = "Run golangci-lint"
+run = "golangci-lint run ./cmd/... ./pkg/..."
+
+[tasks.snapshot]
+description = "Build release artifacts locally"
+run = "goreleaser build --snapshot --clean"

@@ -1,0 +1,5 @@
+[Path]
+PathModified=/home/caddy/Caddyfile
+
+[Install]
+WantedBy=multi-user.target

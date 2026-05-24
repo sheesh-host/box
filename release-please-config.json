@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "separate-pull-requests": true,
+  "tag-separator": "-",
+  "include-component-in-tag": true,
+  "comment": "Per-binary release streams. include-component-in-tag + tag-separator '-' produce prefixed tags (sheesh-v1.2.0) so each cmd/ binary releases independently and goreleaser can key off the prefix. Add one package entry per new cmd/<tool>/.",
+  "packages": {
+    "cmd/sheesh": {
+      "component": "sheesh",
+      "release-type": "go"
+    }
+  }
+}

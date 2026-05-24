@@ -1,0 +1,9 @@
+[template]
+src = "Caddyfile.tmpl"
+dest = "/home/caddy/Caddyfile"
+owner = "caddy"
+gid = 0
+mode = "0644"
+keys = [
+    "/caddy/data",
+]

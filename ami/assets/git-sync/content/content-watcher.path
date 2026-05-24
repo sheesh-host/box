@@ -1,0 +1,6 @@
+[Path]
+PathModified=/home/git-sync/content.env
+PathModified=/home/git-sync/.ssh/content-deploy-key.pem
+
+[Install]
+WantedBy=multi-user.target

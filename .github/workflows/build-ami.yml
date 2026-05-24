@@ -1,0 +1,95 @@
+# Builds and publishes the public sheesh AMI with Packer, then regenerates the
+# amis.json catalog the CLI consumes (pkg/ami).
+#
+# AWS WIRING IS A PLACEHOLDER until an account is provided. Fill in:
+#   - vars.AWS_OIDC_ROLE_ARN  : IAM role this workflow assumes via GitHub OIDC
+#   - vars.AWS_REGION         : build/publish region (e.g. ap-southeast-1)
+#   - vars.PACKER_VPC_ID      : VPC for the ephemeral build instance
+#   - vars.PACKER_SUBNET_ID   : subnet for the ephemeral build instance
+#   - the "publish amis.json" step's upload target (S3 bucket / Pages / etc.)
+name: build-ami
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags: ["ami-v*"]
+
+permissions:
+  contents: read
+  id-token: write # required for AWS OIDC
+
+jobs:
+  validate:
+    # Always safe to run: lints + validates the Packer template without AWS.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-packer@v3
+        with:
+          version: "~> 1.12"
+      - name: packer fmt + syntax check
+        working-directory: ami
+        run: |
+          packer init .
+          packer fmt -check .
+          # Syntax-only: a full validate evaluates the amazon-ami data source,
+          # which needs AWS credentials (only available in the build job).
+          packer validate -syntax-only .
+
+  build:
+    # Real build/publish; only runs on a tag (or manual dispatch) once AWS is wired.
+    needs: validate
+    if: startsWith(github.ref, 'refs/tags/ami-v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # TODO(aws): provide vars.AWS_OIDC_ROLE_ARN + vars.AWS_REGION.
+      - name: Configure AWS credentials (OIDC)
+        if: vars.AWS_OIDC_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: hashicorp/setup-packer@v3
+        with:
+          version: "~> 1.12"
+
+      - name: packer build
+        if: vars.AWS_OIDC_ROLE_ARN != ''
+        working-directory: ami
+        env:
+          PKR_VAR_aws_region: ${{ vars.AWS_REGION }}
+          PKR_VAR_vpc_id: ${{ vars.PACKER_VPC_ID }}
+          PKR_VAR_subnet_id: ${{ vars.PACKER_SUBNET_ID }}
+        run: |
+          packer init .
+          packer build .
+
+      # Transform packer's manifest.json into the amis.json catalog schema
+      # consumed by pkg/ami. manifest artifact_id is "region:ami-id[,region:ami-id]".
+      - name: Generate amis.json
+        if: vars.AWS_OIDC_ROLE_ARN != ''
+        working-directory: ami
+        run: |
+          version="${GITHUB_REF_NAME#ami-}"
+          [ "$version" = "$GITHUB_REF_NAME" ] && version="snapshot"
+          created="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq --arg version "$version" --arg created "$created" '
+            {
+              schema_version: 1,
+              amis: [
+                .builds[-1].artifact_id
+                | split(",")[]
+                | split(":")
+                | {version: $version, region: .[0], ami_id: .[1], arch: "arm64", created: $created}
+              ]
+            }' manifest.json > amis.json
+          cat amis.json
+
+      # TODO(publish): upload ami/amis.json to its public home so the CLI's
+      # default --ami-catalog-url (https://sheesh.host/amis.json) resolves.
+      - name: Publish amis.json
+        if: vars.AWS_OIDC_ROLE_ARN != ''
+        run: echo "TODO: upload ami/amis.json to the public catalog target"

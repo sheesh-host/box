@@ -1,0 +1,54 @@
+repos:
+  - id: /.*/
+    branch: /.*/
+    apply_requirements: [approved]
+    # There is always a workflow named default that corresponds to Atlantis' default workflow
+    workflow: default
+    allowed_overrides: [workflow]
+    allowed_workflows: [tfmigrate]
+    delete_source_branch_on_merge: true
+    # pre_workflow_hooks defines arbitrary list of scripts to execute before atlantis execution.
+    # these may repo-level configuration:
+    # https://www.runatlantis.io/docs/pre-workflow-hooks.html
+    pre_workflow_hooks:
+      - run: /home/atlantis/hooks/tfmigrate-pre-workflow.sh
+
+policies:
+  owners:
+    users:
+      - vincenthsh
+  policy_sets:
+    - name: conftest
+      path: /var/lib/sheesh/git/policies/conftest
+      source: local
+# https://www.runatlantis.io/docs/custom-workflows.html#use-cases
+workflows:
+  tfmigrate:
+    plan:
+      steps:
+        - env:
+            # `TFMIGRATE_EXEC_PATH` is a string how terraform command is executed. Default to `terraform`.
+            # https://github.com/minamijoyo/tfmigrate#environment-variables
+            name: TFMIGRATE_EXEC_PATH
+            # `$ATLANTIS_TERRAFORM_VERSION` is the version of Terraform used for this project.
+            # https://www.runatlantis.io/docs/custom-workflows.html#reference
+            # Note that the `tfmigrate` workflow runs at a migration file directory.
+            # This worklfow assumes all affected directories use the same version.
+            # If you want to use a different version for each directory,
+            # set version dynamically with a wrapper script.
+            command: 'echo "terraform${ATLANTIS_TERRAFORM_VERSION}"'
+        # Run `tfmigrate plan` at repository root and generate a dummy plan file.
+        # At apply step, atlantis detects projects to be applied by finding plan files,
+        # so we need a dummy plan file.
+        #
+        # `$PLANFILE` is an absolute path to the location where Atlantis expects
+        # the plan to either be generated (by plan) or already exist (if running apply).
+        # https://www.runatlantis.io/docs/custom-workflows.html#reference
+        - run: cd $(git rev-parse --show-toplevel) && tfmigrate plan && touch $PLANFILE
+    apply:
+      steps:
+        - env:
+            name: TFMIGRATE_EXEC_PATH
+            command: 'echo "terraform${ATLANTIS_TERRAFORM_VERSION}"'
+        # Run `tfmigrate apply` at repository root
+        - run: cd $(git rev-parse --show-toplevel) && tfmigrate apply

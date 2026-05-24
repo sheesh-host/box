@@ -1,0 +1,5 @@
+creation_rules:
+  - key_groups:
+      - kms:
+          - arn: "arn:aws:kms:ap-southeast-1:508856734184:alias/sops_atlantis"
+            role: "arn:aws:iam::508856734184:role/sops_atlantis"

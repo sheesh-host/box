@@ -1,0 +1,24 @@
+# Go build output
+/bin/
+/dist/
+
+# Generated CLI config / deploy keys (machine-local)
+.sheesh.yaml
+sheesh_deploy_ed25519
+sheesh_deploy_ed25519.pub
+
+# Terraform local state and rendered vars
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+terraform/sheesh.auto.tfvars.json
+terraform/backend.tf
+
+# Packer
+ami/manifest.json
+
+# Atlantis-era e2e test runtime fixtures (the test/ harness is pending a
+# sheesh-specific rewrite; the seeded Gitea data + mock state are generated).
+ami/test/compose/gitea_test/gitea/
+ami/test/compose/mock-terraform/

@@ -1,0 +1,9 @@
+[template]
+src = "content-deploy-key.pem.tmpl"
+dest = "/home/git-sync/.ssh/content-deploy-key.pem"
+owner = "git-sync"
+gid = 0
+mode = "0600"
+keys = [
+    "/content-deploy-key/contents",
+]
