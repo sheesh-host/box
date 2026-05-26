@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "skills": {
+    "aws-ami-builder": {
+      "source": "hashicorp/agent-skills",
+      "ref": "HEAD",
+      "sourceType": "github",
+      "computedHash": "e62206907650a92c7a138f167cb3539ec4763c76c2bae95b58bae5e86906a7bc"
+    },
+    "launching-ec2-instance-with-best-practices": {
+      "source": "aws/agent-toolkit-for-aws",
+      "ref": "HEAD",
+      "sourceType": "github",
+      "computedHash": "f36da1406c030637408fd283ea16499151682cd00ad4dbdcdcfacb062854a282"
+    },
+    "skill-creator": {
+      "source": "anthropics/skills",
+      "ref": "HEAD",
+      "sourceType": "github",
+      "computedHash": "b2bfe91d69ca99994c0566baede889e7d2b9bb8791c6b6106c5d387392f717f6"
+    },
+    "terraform-style-guide": {
+      "source": "hashicorp/agent-skills",
+      "ref": "HEAD",
+      "sourceType": "github",
+      "computedHash": "fd301fe5bfb41764acac67c25244cc5650b5dd0a5d8d037414449a2d3adecbbf"
+    },
+    "terraform-test": {
+      "source": "hashicorp/agent-skills",
+      "ref": "HEAD",
+      "sourceType": "github",
+      "computedHash": "124fdde03e38d9942810e65e762eaf95f8680a1f1f6fdae3ecda16d86b10620b"
+    }
+  }
+}
