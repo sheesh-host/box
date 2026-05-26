@@ -1,12 +1,19 @@
 # Builds and publishes the public sheesh AMI with Packer, then regenerates the
 # amis.json catalog the CLI consumes (pkg/ami).
 #
-# AWS WIRING IS A PLACEHOLDER until an account is provided. Fill in:
+# AWS is wired via GitHub OIDC (no long-lived keys). Repo variables:
 #   - vars.AWS_OIDC_ROLE_ARN  : IAM role this workflow assumes via GitHub OIDC
-#   - vars.AWS_REGION         : build/publish region (e.g. ap-southeast-1)
-#   - vars.PACKER_VPC_ID      : VPC for the ephemeral build instance
-#   - vars.PACKER_SUBNET_ID   : subnet for the ephemeral build instance
-#   - the "publish amis.json" step's upload target (S3 bucket / Pages / etc.)
+#   - vars.AWS_REGION         : build region (us-east-1)
+#   - vars.PACKER_VPC_ID      : default VPC for the ephemeral build instance
+#   - vars.PACKER_SUBNET_ID   : default public subnet for the build instance
+# The AMI is built in vars.AWS_REGION, copied to ap-southeast-1, and made public
+# (see PKR_VAR_ami_regions / PKR_VAR_ami_groups in the build step below).
+#
+# The amis.json catalog is published to sheesh-host/sheesh-host.github.io
+# (public/amis.json) via the sheesh-release-bot GitHub App, so the CLI's default
+# --ami-catalog-url (https://sheesh.host/amis.json) resolves. Requires:
+#   - vars.RELEASE_BOT_APP_ID    : sheesh-release-bot App ID
+#   - secrets.RELEASE_BOT_PRIVATE_KEY : its private key PEM
 name: build-ami
 
 on:
@@ -44,7 +51,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # TODO(aws): provide vars.AWS_OIDC_ROLE_ARN + vars.AWS_REGION.
       - name: Configure AWS credentials (OIDC)
         if: vars.AWS_OIDC_ROLE_ARN != ''
         uses: aws-actions/configure-aws-credentials@v4
@@ -63,6 +69,10 @@ jobs:
           PKR_VAR_aws_region: ${{ vars.AWS_REGION }}
           PKR_VAR_vpc_id: ${{ vars.PACKER_VPC_ID }}
           PKR_VAR_subnet_id: ${{ vars.PACKER_SUBNET_ID }}
+          # Copy to + publish publicly in these regions. Must exclude the build
+          # region (vars.AWS_REGION); keep in sync if the build region changes.
+          PKR_VAR_ami_regions: '["ap-southeast-1"]'
+          PKR_VAR_ami_groups: '["all"]'
         run: |
           packer init .
           packer build .
@@ -88,8 +98,34 @@ jobs:
             }' manifest.json > amis.json
           cat amis.json
 
-      # TODO(publish): upload ami/amis.json to its public home so the CLI's
-      # default --ami-catalog-url (https://sheesh.host/amis.json) resolves.
-      - name: Publish amis.json
+      # Publish to sheesh-host.github.io via the sheesh-release-bot GitHub App:
+      # mint a short-lived token scoped only to the Pages repo, then push
+      # public/amis.json. Vite copies public/ to the site root and a push to
+      # main auto-triggers the Pages deploy, serving it at
+      # https://sheesh.host/amis.json (the CLI's default --ami-catalog-url).
+      - name: Mint release-bot token
         if: vars.AWS_OIDC_ROLE_ARN != ''
-        run: echo "TODO: upload ami/amis.json to the public catalog target"
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: sheesh-host
+          repositories: sheesh-host.github.io
+
+      - name: Publish amis.json to the Pages repo
+        if: vars.AWS_OIDC_ROLE_ARN != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          tmp="$(mktemp -d)"
+          git clone --depth 1 \
+            "https://x-access-token:${GH_TOKEN}@github.com/sheesh-host/sheesh-host.github.io.git" "$tmp"
+          # Vite serves public/ at the site root; the repo root is source, not output.
+          cp ami/amis.json "$tmp/public/amis.json"
+          cd "$tmp"
+          git config user.name  "sheesh-release-bot[bot]"
+          git config user.email "sheesh-release-bot[bot]@users.noreply.github.com"
+          git add public/amis.json
+          git commit -m "chore: update amis.json (${GITHUB_REF_NAME})" || { echo "no changes"; exit 0; }
+          git push origin HEAD:main

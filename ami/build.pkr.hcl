@@ -7,11 +7,11 @@ packer {
       source  = "github.com/hashicorp/amazon"
     }
     git = {
-      version = "~> 0.3.2"
+      version = "~> 0.5"
       source  = "github.com/ethanmdavidson/git"
     }
     amazon-ami-management = {
-      version = "~> 1.4.1"
+      version = "~> 1.7"
       source  = "github.com/wata727/amazon-ami-management"
     }
   }
@@ -37,6 +37,12 @@ variable "ami_regions" {
 
 variable "ami_org_arns" {
   description = "The AWS Organizations to publish the AMI to"
+  type        = list(string)
+  default     = []
+}
+
+variable "ami_groups" {
+  description = "User groups granted launch permission. Set to [\"all\"] to make the AMI public."
   type        = list(string)
   default     = []
 }
@@ -130,9 +136,10 @@ source "amazon-ebs" "ubuntu" {
     volume_type           = "gp3"
   }
 
-  # publish to additional regions / AWS Organizations
+  # publish to additional regions / AWS Organizations, and (optionally) make public
   ami_regions  = var.ami_regions
   ami_org_arns = var.ami_org_arns
+  ami_groups   = var.ami_groups
 }
 
 build {
@@ -191,7 +198,7 @@ build {
   post-processor "amazon-ami-management" {
     # https://github.com/wata727/packer-plugin-amazon-ami-management#usage
     # plugin will skip images in use across Instances, LaunchConfigurations and LaunchTemplates
-    regions       = [var.aws_region]
+    regions       = distinct(concat([var.aws_region], var.ami_regions))
     identifier    = local.identifier
     keep_releases = 3
   }

@@ -17,6 +17,10 @@ terraform/backend.tf
 
 # Packer
 ami/manifest.json
+ami/amis.json
+# Local build-infra inputs (account-specific VPC/subnet); the committed template
+# is ami/.auto.pkrvars.hcl.example.
+ami/.auto.pkrvars.hcl
 
 # Atlantis-era e2e test runtime fixtures (the test/ harness is pending a
 # sheesh-specific rewrite; the seeded Gitea data + mock state are generated).

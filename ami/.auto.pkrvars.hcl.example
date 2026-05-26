@@ -1,0 +1,26 @@
+# Build-infra inputs for a LOCAL `packer build`. Copy this file to
+# `.auto.pkrvars.hcl` (git-ignored) and fill in values for YOUR AWS account:
+#
+#   cp .auto.pkrvars.hcl.example .auto.pkrvars.hcl
+#
+# Packer auto-loads any `*.auto.pkrvars.hcl` file. These are build-time infra
+# IDs (account-specific) and are kept out of git. CI sets them instead from
+# repo variables (vars.AWS_REGION / vars.PACKER_VPC_ID / vars.PACKER_SUBNET_ID;
+# see ../.github/workflows/build-ami.yml).
+#
+# Find your default VPC + a default (public) subnet in your build region:
+#   aws ec2 describe-vpcs    --region <region> --filters Name=isDefault,Values=true \
+#     --query 'Vpcs[].VpcId' --output text
+#   aws ec2 describe-subnets --region <region> \
+#     --filters Name=vpc-id,Values=<vpc-id> Name=default-for-az,Values=true \
+#     --query 'Subnets[].{Subnet:SubnetId,AZ:AvailabilityZone,PublicIP:MapPublicIpOnLaunch}' \
+#     --output table
+
+aws_region    = "us-east-1"
+vpc_id        = "vpc-REPLACE_ME"
+subnet_id     = "subnet-REPLACE_ME"
+instance_type = "t4g.large"
+
+# A plain `packer build .` produces a PRIVATE image in aws_region only. To also
+# copy to other regions and make it PUBLIC (as CI does), add:
+#   packer build -var-file=publish.pkrvars.hcl .

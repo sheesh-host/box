@@ -17,10 +17,22 @@ Each service lives under `assets/<service>/` as a self-contained unit:
 
 ## Build
 
+Configure your account's build infra once (default VPC + a default public
+subnet in your build region). The local file is git-ignored:
+
 ```sh
-# Local build (set your own VPC/subnet in .auto.pkrvars.hcl first):
+cp .auto.pkrvars.hcl.example .auto.pkrvars.hcl
+# edit aws_region / vpc_id / subnet_id for your account
+```
+
+```sh
 packer init .
+
+# Private image in aws_region only (good for testing):
 packer build .
+
+# Public image, copied to ami_regions (what CI publishes):
+packer build -var-file=publish.pkrvars.hcl .
 
 # Validate without building:
 packer validate -var vpc_id=vpc-xxxx -var subnet_id=subnet-xxxx .
@@ -29,6 +41,10 @@ packer validate -var vpc_id=vpc-xxxx -var subnet_id=subnet-xxxx .
 CI builds and publishes the AMI on an `ami-v*` tag and regenerates the public
 `amis.json` catalog the `sheesh` CLI consumes
 (see [`../.github/workflows/build-ami.yml`](../.github/workflows/build-ami.yml)).
+It builds in `us-east-1`, copies to `ap-southeast-1`, and makes both public.
+AWS access uses GitHub OIDC (no stored keys) via the
+`sheesh-box-ami-builder` IAM role; build infra comes from the repo variables
+`AWS_REGION` / `PACKER_VPC_ID` / `PACKER_SUBNET_ID`.
 
 ## Runtime layout
 
