@@ -1,0 +1,29 @@
+{
+  "skill_name": "agentic-go-cli-design",
+  "description": "Evaluates whether the skill drives agent-friendly Cobra CLI output: progressive --help, compact human output with footer hints, complete --json, navigational errors, load-bearing exit codes, and detailed-data-to-disk for grep/sed on large reports.",
+  "baseline": "without_skill",
+  "prompt_design_note": "Prompts are deliberately NAIVE — they read like a casual 'just add this command' request and leak NONE of the skill's quality requirements (no 'agents get stuck', no 'context window', no 'design the output', no enumerated failure modes). The whole point is to measure what the skill produces UNPROMPTED vs a baseline given the same bare request. iteration-1 used requirement-leaking prompts and was discarded for that reason.",
+  "evals": [
+    {
+      "id": 0,
+      "name": "new-command-design",
+      "prompt": "Add an `ami list` command to our `sheesh` CLI (it's Go + Cobra). It lists the AMIs we've built — each AMI has a name, region, build date, the source git SHA it was built from, the packer template path, and a description. Wire up the cobra command.",
+      "expected_output": "A Cobra command with a Long description and >=2 Examples; compact human output that truncates the long description and shows a count + footer hint pointing at the drill-down/--json path; a complete, untruncated --json mode; data to stdout and any errors to stderr.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "error-navigation",
+      "prompt": "Our `sheesh build <ami>` command shells out to `packer build`. On failure right now it just does `return fmt.Errorf(\"packer failed: %s\", stderr)`. Clean up the error handling.",
+      "expected_output": "Error that preserves the raw packer/exec error verbatim AND adds cause-based fix guidance; distinguishes 'packer not installed' from 'present but auth/credential failure'; offers a --verbose escape hatch; uses distinct non-zero exit codes for usage vs prerequisite failure; writes to stderr.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "aggregate-output",
+      "prompt": "Add a `sheesh report` command to our `sheesh` CLI (Go + Cobra). It runs our AMI compliance audit across every region — for each AMI it collects the CVEs found, the package version diffs vs our baseline, and any failed CIS checks. Wire it up so it prints the audit.",
+      "expected_output": "Compact human summary (per-AMI/aggregate counts, not the full nested data) ending in a footer hint; complete --json for programmatic consumption; detailed per-AMI findings written to files on disk that the agent can grep/sed/jq through instead of dumping to stdout; meaningful exit code reflecting pass/fail of the audit gate.",
+      "files": []
+    }
+  ]
+}
