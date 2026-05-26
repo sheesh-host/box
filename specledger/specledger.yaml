@@ -1,0 +1,21 @@
+version: 1.0.0
+project:
+    name: box
+    short_code: bo
+    created: 2026-05-26T10:52:12.494751+08:00
+    modified: 2026-05-26T10:52:15.074526+08:00
+    version: 0.1.0
+playbook:
+    name: specledger
+    version: 1.0.0
+    applied_at: 2026-05-26T10:52:12.494751+08:00
+    structure:
+        - .specledger/
+        - .gitattributes
+        - AGENTS.md
+        - mise.toml
+template_version: 1.2.2
+task_tracker:
+    choice: builtin
+    enabled_at: 2026-05-26T10:52:12.494751+08:00
+artifact_path: specledger/
