@@ -28,7 +28,8 @@ Every subcommand should satisfy these:
 1. **Every subcommand has a `Long` description with ≥2 `Examples`** in its Cobra definition.
    The agent must be able to construct a correct command from `--help` alone.
 2. **Every error suggests a fix** — what failed, why (the *real* error), and what to run instead.
-3. **Human output is compact** — truncated previews, counts, and a footer hint for next steps.
+3. **Human output is compact** — truncated previews, counts, and a footer hint for next steps. Large
+   or unbounded nested detail goes to per-item files on disk (+ an `index.json`), not stdout.
 4. **JSON output is complete** — full data, pipeable to `jq`, never truncated.
 5. **Errors to stderr, data to stdout** — so `cmd --json 2>/dev/null | jq ...` stays clean.
 6. **Positional args for the simple case**; reserve flags for optional/complex params.
@@ -84,6 +85,19 @@ should redirect to the intended reality, not just say "unknown command".
   decides what to extract. Token efficiency comes from the *workflow* (search → inspect), not from
   truncating JSON.
 
+**When the detail is large or unbounded, add a third tier: write it to disk.** Some commands produce
+data whose volume scales with the *work*, not the command — a per-AMI audit, a per-file scan, a
+fan-out across regions. Streaming all of that to stdout (even as `--json`) floods the agent's context
+the moment the fleet grows. Instead, write the full nested detail to **files on disk** — one file per
+item plus an `index.json` roll-up mapping each item to its detail file — and keep stdout to the
+compact summary plus a footer hint that names the directory. The agent then `grep`/`sed`/`jq`s only
+the one file it needs and never pays the token cost of the rest. It's the same scan → inspect workflow
+as `--json`, except the inspect step is a cheap file read instead of re-running the command. **Default
+to writing the artifacts** (don't hide them behind an opt-in flag) when producing that detail is the
+command's whole point, and print where they went. A single combined blob (`--out audit.json`) is for
+the *audit-trail* case — it is not a substitute for per-item files, because the agent still has to load
+the whole thing to find one record.
+
 **Exit codes are load-bearing**, especially for gate commands run in CI. Distinguish failure
 classes so a CI step (or agent) can branch on *why* it failed, e.g.:
 
@@ -101,6 +115,9 @@ internal package that every command calls, so the gate can never diverge from wh
 ## Anti-Patterns to Avoid
 
 - Dumping the full manifest/description in compact human output (truncate + summarize instead).
+- Streaming unbounded nested data (per-item findings, scan results) to stdout when it should be
+  written to per-item files on disk + an `index.json` — or collapsing the drill-down into a single
+  `--out` blob the agent must load whole. Write per-item artifacts and let the agent grep/jq one.
 - Swallowing the raw error behind friendly guidance (preserve it).
 - Parallel implementations of a core primitive in two commands — they drift. One implementation,
   one internal package, every command dispatches to it.

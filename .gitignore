@@ -26,3 +26,7 @@ ami/.auto.pkrvars.hcl
 # sheesh-specific rewrite; the seeded Gitea data + mock state are generated).
 ami/test/compose/gitea_test/gitea/
 ami/test/compose/mock-terraform/
+
+# skill creator eval runs
+agentic-go-cli-design-workspace
+
